@@ -118,17 +118,16 @@ class ViTLightningModule(pl.LightningModule):
         self.train()
         self.unfreeze()
 
-    def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
+    def on_train_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
         self.save_logits()
         for name, params in self.vit.named_parameters():
-            if name in ['pooler.dense.bias','pooler.dense.weight']:
-                checkpoint['vit_head_'+name] = params
+            if name in ['pooler.dense.bias', 'pooler.dense.weight']:
+                checkpoint['vit_head_' + name] = params
 
     def on_load_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
         for name, params in self.vit.named_parameters():
-            if name in ['pooler.dense.bias','pooler.dense.weight']:
-                params = checkpoint['vit_head_'+name]
-
+            if name in ['pooler.dense.bias', 'pooler.dense.weight']:
+                params = checkpoint['vit_head_' + name]
 
 
 # for early stopping, see https://pytorch-lightning.readthedocs.io/en/1.0.0/early_stopping.html?highlight=early%20stopping
@@ -141,6 +140,6 @@ early_stop_callback = EarlyStopping(
 )
 
 model = ViTLightningModule()
-trainer = Trainer(devices=1, callbacks=[early_stop_callback], log_every_n_steps=5)
+trainer = Trainer(devices=1, callbacks=[early_stop_callback], log_every_n_steps=5, enable_checkpointing=False)
 trainer.fit(model)
-trainer.save_checkpoint('final.ckpt') # also saves logits
+trainer.save_checkpoint('final.ckpt')  # also saves logits

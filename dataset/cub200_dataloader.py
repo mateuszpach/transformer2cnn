@@ -20,8 +20,8 @@ class CUB200Dataset(torch.utils.data.Dataset):
         self.transform = transform
         self.subset = subset
         if subset:
-            self.mapping_cl_to_idx = {cl:i for i,cl in enumerate(subset)}
-            self.mapping_idx_to_cl = {i:cl for i,cl in enumerate(subset)}
+            self.mapping_cl_to_idx = {cl: i for i, cl in enumerate(subset)}
+            self.mapping_idx_to_cl = {i: cl for i, cl in enumerate(subset)}
         self.imgs_class = {}  # id -> class
         with open(os.path.join(path, 'image_class_labels.txt')) as file:
             for row in file:
@@ -71,10 +71,11 @@ class CUB200Dataset(torch.utils.data.Dataset):
             img = self.transform(img)
         label = self.imgs_class[id] if self.subset is None else self.mapping_cl_to_idx[self.imgs_class[id]]
         return img, label
-    def get_filename(self,idx):
+
+    def get_filename(self, idx):
         id = (self.train_ids[idx] if self.train else self.test_ids[idx])
         return self.imgs_path[id]
-    def get_id(self,idx):
+
+    def get_id(self, idx):
         id = (self.train_ids[idx] if self.train else self.test_ids[idx])
         return id
-
