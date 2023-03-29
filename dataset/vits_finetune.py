@@ -32,7 +32,7 @@ class ViTLightningModule(pl.LightningModule):
         self.vit = ViTModel.from_pretrained('facebook/dino-vits8').cuda()
         self.final = nn.Linear(384, num_labels).cuda()
         self.unfreeze()
-        self.on_save_checkpoint(None)
+        self.save_logits()
 
     def forward(self, pixel_values):
         outputs = self.vit(pixel_values=pixel_values)
@@ -96,7 +96,7 @@ class ViTLightningModule(pl.LightningModule):
     def test_dataloader(self):
         return dl_test
 
-    def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
+    def save_logits(self) -> None:
         self.freeze()
         self.eval()
         with torch.no_grad():
@@ -117,9 +117,13 @@ class ViTLightningModule(pl.LightningModule):
                 print("Acc on {} = {:.5}".format(ds_name, correct / all))
         self.train()
         self.unfreeze()
+
+    def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
+        self.save_logits()
         for name, params in self.vit.named_parameters():
             if name in ['pooler.dense.bias','pooler.dense.weight']:
                 checkpoint['vit_head_'+name] = params
+
     def on_load_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
         for name, params in self.vit.named_parameters():
             if name in ['pooler.dense.bias','pooler.dense.weight']:
