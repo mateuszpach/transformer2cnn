@@ -134,13 +134,13 @@ class ViTLightningModule(pl.LightningModule):
 # for early stopping, see https://pytorch-lightning.readthedocs.io/en/1.0.0/early_stopping.html?highlight=early%20stopping
 early_stop_callback = EarlyStopping(
     monitor='training_accuracy',
-    patience=5,
+    patience=4,
     strict=False,
     verbose=False,
-    mode='min'
+    mode='max'
 )
 
 model = ViTLightningModule()
 trainer = Trainer(devices=1, callbacks=[early_stop_callback], log_every_n_steps=5)
 trainer.fit(model)
-model.save_checkpoint() # also saves logits
+trainer.save_checkpoint('final.ckpt') # also saves logits
