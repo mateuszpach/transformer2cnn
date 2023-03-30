@@ -10,59 +10,70 @@ class CUB200Dataset(torch.utils.data.Dataset):
     # cutouts - if dataloader is to load cutouts or images
     # train - loads train or test set
     # subset - limits classes to only the selected ones, None or False for all classes
-    def __init__(self, path, transform=None, cutouts=True, train=True,
+    def __init__(self, path, transform=None, cutouts=True, data_set='ALL', return_id=False,
                  subset=[3, 5, 9, 15, 17, 18, 20, 21, 27, 29, 36, 44, 45, 46, 47, 51, 64, 72, 82, 84, 87, 90, 91, 92,
                          93, 98, 99, 100, 104, 106, 107, 108, 110, 111, 134, 139, 141, 149, 173, 187, 199, 200]
                  ):
-        self.train = train
+        self.data_set = data_set.upper() if data_set else 'ALL'
+        assert self.data_set in ['ALL', 'TRAIN', 'TEST']
         self.cutouts = cutouts
         self.path = path
         self.transform = transform
         self.subset = subset
+        self.return_id = return_id
         if subset:
             self.mapping_cl_to_idx = {cl: i for i, cl in enumerate(subset)}
             self.mapping_idx_to_cl = {i: cl for i, cl in enumerate(subset)}
         self.imgs_class = {}  # id -> class
+        self.classes = set()
         with open(os.path.join(path, 'image_class_labels.txt')) as file:
             for row in file:
                 row = row.split(' ')
-                id, cls = int(row[0]), int(row[1])
-                self.imgs_class[id] = cls
+                id, cls = int(row[0]), int(row[1])-1 # classes are numbered from 1, I need them to start at 0
+                if self.subset is None or self.imgs_class[id] in subset:
+                    self.imgs_class[id] = cls
+                    self.classes.add(cls)
+        self.is_train = {}
+        with open(os.path.join(path, 'train_test_split.txt')) as file:
+            for row in file:
+                row = row.split(' ')
+                id, is_train = int(row[0]), (int(row[1]) == 1)
+                self.is_train[id] = is_train
+
+        def allow(id):
+            if self.data_set == 'ALL':
+                return True
+            elif self.data_set == 'TRAIN':
+                return self.is_train[id]
+            else:
+                return not self.is_train[id]
+
         self.imgs_ids = {}  # name -> id
         self.imgs_names = {}  # id -> name
         self.imgs_path = {}
+        self.ids = {}  # idx -> id
         with open(os.path.join(path, 'images.txt')) as file:
             for row in file:
                 row = row.split(' ')
                 # the '-1' removes trailing \n
                 id, name = int(row[0]), row[1][row[1].find('/') + 1:]
-                if subset and self.imgs_class[id] in subset:
+                if (self.subset is None or self.imgs_class[id] in subset) and allow(id):
                     self.imgs_path[id] = row[1][:-1]
                     self.imgs_ids[name] = id
                     self.imgs_names[id] = name
-        self.train_ids = {}  # idx -> id
-        self.test_ids = {}  # idx -> id
-        with open(os.path.join(path, 'train_test_split.txt')) as file:
-            for row in file:
-                row = row.split(' ')
-                id, is_train = int(row[0]), (int(row[1]) == 1)
-                if subset and self.imgs_class[id] in subset:
-                    if is_train:
-                        self.train_ids[len(self.train_ids)] = id
-                    else:
-                        self.test_ids[len(self.test_ids)] = id
+                    self.ids[len(self.ids)] = id
+        print('Found {} classes'.format(self.num_classes()) )
 
     def __len__(self):
-        if self.train:
-            return len(self.train_ids)
-        else:
-            return len(self.test_ids)
+        return len(self.ids)
+    def num_classes(self):
+        return len(self.classes)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        id = (self.train_ids[idx] if self.train else self.test_ids[idx])
+        id = self.ids[idx]
         if self.cutouts:
             img = Image.open(os.path.join(self.path, 'cutouts', self.imgs_path[id]))
         else:
@@ -70,12 +81,13 @@ class CUB200Dataset(torch.utils.data.Dataset):
         if self.transform:
             img = self.transform(img)
         label = self.imgs_class[id] if self.subset is None else self.mapping_cl_to_idx[self.imgs_class[id]]
-        return img, label
+        if self.return_id:
+            return img, label, id
+        else:
+            return img, label
 
     def get_filename(self, idx):
-        id = (self.train_ids[idx] if self.train else self.test_ids[idx])
-        return self.imgs_path[id]
+        return self.imgs_path[self.get_id(idx)]
 
     def get_id(self, idx):
-        id = (self.train_ids[idx] if self.train else self.test_ids[idx])
-        return id
+        return self.ids[idx]
