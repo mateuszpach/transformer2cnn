@@ -28,7 +28,7 @@ subset = None
 #
 ds_train = CUB200Dataset('./caltech_birds2011/CUB_200_2011', data_set='TRAIN', transform=trans,subset=subset)
 ds_test = CUB200Dataset('./caltech_birds2011/CUB_200_2011', data_set='TEST', transform=trans,subset=subset)
-ds_all = CUB200Dataset('./caltech_birds2011/CUB_200_2011', data_set='ALL', transform=trans,return_id=True,subset=subset)
+ds_all = CUB200Dataset('./caltech_birds2011/CUB_200_2011', data_set='ALL', transform=trans,subset=subset)
 dl_train = DataLoader(ds_train, batch_size=bs, shuffle=True)
 dl_test = DataLoader(ds_test, batch_size=bs, shuffle=False)
 dl_all = DataLoader(ds_all, batch_size=bs, shuffle=False)
@@ -49,10 +49,7 @@ class ViTLightningModule(pl.LightningModule):
         last_hidden_states = outputs.last_hidden_state
         cls = last_hidden_states[:, 0, :]
         outputs = self.final(cls)
-        if return_cls:
-            return outputs,cls
-        else:
-            return outputs
+        return {'outputs':outputs,'cls':cls}
 
     def freeze(self) -> None:
         for name, layer in self.vit.named_modules():
@@ -69,10 +66,12 @@ class ViTLightningModule(pl.LightningModule):
             param.requires_grad = True
 
     def common_step(self, batch, batch_idx):
-        imgs, labels = batch
+        print(batch)
+        print(batch['logit'].shape,batch['cls'].shape)
+        imgs, labels = batch['img'],batch['label']
         labels = labels.cuda()
         imgs = imgs['pixel_values'].cuda().squeeze()
-        logits = self(imgs)
+        logits = self(imgs)['outputs']
 
         criterion = nn.CrossEntropyLoss()
         predictions = logits.argmax(-1)
@@ -121,10 +120,12 @@ class ViTLightningModule(pl.LightningModule):
             all = 0
             correct = 0
             logits = {}
-            for imgs,labels,ids in tqdm(dl_all,leave=False,desc='Saving logits'):
+            for batch in tqdm(dl_all,leave=False,desc='Saving logits'):
+                imgs,labels,ids = batch['img'],batch['label'],batch['id']
                 imgs = imgs['pixel_values'].cuda().squeeze()
                 labels = labels.cuda()
-                outs,clses = self(imgs,return_cls=True)
+                output = self(imgs,return_cls=True)
+                outs, clses = output['output'],output['cls']
                 prediction = outs.argmax(-1)
                 correct += torch.where(prediction == labels,1.0,0.0).sum()
                 all += len(labels)

@@ -10,7 +10,7 @@ class CUB200Dataset(torch.utils.data.Dataset):
     # cutouts - if dataloader is to load cutouts or images
     # train - loads train or test set
     # subset - limits classes to only the selected ones, None or False for all classes
-    def __init__(self, path, transform=None, cutouts=True, data_set='ALL', return_id=False,
+    def __init__(self, path, transform=None, cutouts=True, data_set='ALL',
                  subset=[3, 5, 9, 15, 17, 18, 20, 21, 27, 29, 36, 44, 45, 46, 47, 51, 64, 72, 82, 84, 87, 90, 91, 92,
                          93, 98, 99, 100, 104, 106, 107, 108, 110, 111, 134, 139, 141, 149, 173, 187, 199, 200]
                  ):
@@ -20,18 +20,22 @@ class CUB200Dataset(torch.utils.data.Dataset):
         self.path = path
         self.transform = transform
         self.subset = subset
-        self.return_id = return_id
         if subset:
             self.mapping_cl_to_idx = {cl: i for i, cl in enumerate(subset)}
             self.mapping_idx_to_cl = {i: cl for i, cl in enumerate(subset)}
         self.imgs_class = {}  # id -> class
         self.classes = set()
+        try:
+            self.logits = torch.load(os.path.join(path,'trained_logits.pt'))
+        except:
+            print('FAILED')
+            self.logits = None
         with open(os.path.join(path, 'image_class_labels.txt')) as file:
             for row in file:
                 row = row.split(' ')
                 id, cls = int(row[0]), int(row[1])-1 # classes are numbered from 1, I need them to start at 0
-                if self.subset is None or self.imgs_class[id] in subset:
-                    self.imgs_class[id] = cls
+                self.imgs_class[id] = cls
+                if self.subset is None or cls+1 in subset:
                     self.classes.add(cls)
         self.is_train = {}
         with open(os.path.join(path, 'train_test_split.txt')) as file:
@@ -81,10 +85,10 @@ class CUB200Dataset(torch.utils.data.Dataset):
         if self.transform:
             img = self.transform(img)
         label = self.imgs_class[id] if self.subset is None else self.mapping_cl_to_idx[self.imgs_class[id]]
-        if self.return_id:
-            return img, label, id
-        else:
-            return img, label
+        item = {'img':img, 'label':label, 'id':id}
+        if self.logits and id in self.logits.keys():
+            item['logit'],item['cls'] = self.logits[id]
+        return item
 
     def get_filename(self, idx):
         return self.imgs_path[self.get_id(idx)]
