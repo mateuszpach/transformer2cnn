@@ -28,7 +28,6 @@ class CUB200Dataset(torch.utils.data.Dataset):
         try:
             self.logits = torch.load(os.path.join(path,'trained_logits.pt'))
         except:
-            print('FAILED')
             self.logits = None
         with open(os.path.join(path, 'image_class_labels.txt')) as file:
             for row in file:
@@ -67,6 +66,16 @@ class CUB200Dataset(torch.utils.data.Dataset):
                     self.imgs_names[id] = name
                     self.ids[len(self.ids)] = id
         print('Found {} classes'.format(self.num_classes()) )
+        self.bounding_boxes  = {}
+        with open(os.path.join(path, 'bounding_boxes.txt')) as file:
+            for row in file:
+                row = row.split(' ')
+                # the '-1' removes trailing \n
+                id, tmp_bbox = int(row[0]), row[1:]
+                bbox = []
+                for coord in tmp_bbox:
+                    bbox.append(int(coord))
+                self.bounding_boxes[id] = bbox
 
     def __len__(self):
         return len(self.ids)
@@ -82,6 +91,7 @@ class CUB200Dataset(torch.utils.data.Dataset):
             img = Image.open(os.path.join(self.path, 'cutouts', self.imgs_path[id]))
         else:
             img = Image.open(os.path.join(self.path, 'images', self.imgs_path[id]))
+        img = img.crop(tuple(self.bounding_boxes[id]))
         if self.transform:
             img = self.transform(img)
         label = self.imgs_class[id] if self.subset is None else self.mapping_cl_to_idx[self.imgs_class[id]]

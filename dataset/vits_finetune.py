@@ -18,6 +18,8 @@ from pytorch_lightning.callbacks import EarlyStopping
 
 bs = 32
 feature_extractor = ViTFeatureExtractor.from_pretrained('facebook/dino-vits8')
+# resize to 224 normalize with
+# transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 trans = transforms.Compose([
     transforms.Lambda(lambda x: feature_extractor(images=x, return_tensors="pt"))
 ])
@@ -66,8 +68,6 @@ class ViTLightningModule(pl.LightningModule):
             param.requires_grad = True
 
     def common_step(self, batch, batch_idx):
-        print(batch)
-        print(batch['logit'].shape,batch['cls'].shape)
         imgs, labels = batch['img'],batch['label']
         labels = labels.cuda()
         imgs = imgs['pixel_values'].cuda().squeeze()
