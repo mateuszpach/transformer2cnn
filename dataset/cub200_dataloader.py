@@ -26,15 +26,16 @@ class CUB200Dataset(torch.utils.data.Dataset):
         self.imgs_class = {}  # id -> class
         self.classes = set()
         try:
-            self.logits = torch.load(os.path.join(path,'trained_logits.pt'))
+            self.logits = torch.load(os.path.join(path, 'trained_logits.pt'))
+            self.logits = {int(key): value for key, value in self.logits.items()}
         except:
             self.logits = None
         with open(os.path.join(path, 'image_class_labels.txt')) as file:
             for row in file:
                 row = row.split(' ')
-                id, cls = int(row[0]), int(row[1])-1 # classes are numbered from 1, I need them to start at 0
+                id, cls = int(row[0]), int(row[1]) - 1  # classes are numbered from 1, I need them to start at 0
                 self.imgs_class[id] = cls
-                if self.subset is None or cls+1 in subset:
+                if self.subset is None or cls + 1 in subset:
                     self.classes.add(cls)
         self.is_train = {}
         with open(os.path.join(path, 'train_test_split.txt')) as file:
@@ -65,20 +66,17 @@ class CUB200Dataset(torch.utils.data.Dataset):
                     self.imgs_ids[name] = id
                     self.imgs_names[id] = name
                     self.ids[len(self.ids)] = id
-        print('Found {} classes'.format(self.num_classes()) )
-        self.bounding_boxes  = {}
+        print('Found {} classes'.format(self.num_classes()))
+        self.bounding_boxes = {}
         with open(os.path.join(path, 'bounding_boxes.txt')) as file:
             for row in file:
-                row = row.split(' ')
-                # the '-1' removes trailing \n
-                id, tmp_bbox = int(row[0]), row[1:]
-                bbox = []
-                for coord in tmp_bbox:
-                    bbox.append(int(coord))
-                self.bounding_boxes[id] = bbox
+                id, x, y, width, height = row.split(' ')
+                id, x, y, width, height = int(id), float(x), float(y), float(width), float(height)
+                self.bounding_boxes[id] = (x, y, x + width, y + height)
 
     def __len__(self):
         return len(self.ids)
+
     def num_classes(self):
         return len(self.classes)
 
@@ -91,13 +89,13 @@ class CUB200Dataset(torch.utils.data.Dataset):
             img = Image.open(os.path.join(self.path, 'cutouts', self.imgs_path[id]))
         else:
             img = Image.open(os.path.join(self.path, 'images', self.imgs_path[id]))
-        img = img.crop(tuple(self.bounding_boxes[id]))
+        img = img.crop(self.bounding_boxes[id])
         if self.transform:
             img = self.transform(img)
         label = self.imgs_class[id] if self.subset is None else self.mapping_cl_to_idx[self.imgs_class[id]]
-        item = {'img':img, 'label':label, 'id':id}
+        item = {'img': img, 'label': label, 'id': id}
         if self.logits and id in self.logits.keys():
-            item['logit'],item['cls'] = self.logits[id]
+            item['logits'], item['cls'] = self.logits[id]
         return item
 
     def get_filename(self, idx):

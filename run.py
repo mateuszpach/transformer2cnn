@@ -1,64 +1,67 @@
-import torchvision.models as models
-from typing import Dict, Any
-
+import pytorch_lightning as pl
 import torch
-from transformers import ViTFeatureExtractor, ViTModel
-from PIL import Image
-import requests
-import numpy as np
-from tqdm import tqdm
-from dataset.cub200_dataloader import CUB200Dataset
+import torch.nn as nn
+import torch.nn.functional as F
+import torchvision.models as models
+from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import EarlyStopping
 from torch.utils.data import DataLoader
 from torchvision.transforms import transforms
-import pytorch_lightning as pl
 from transformers import AdamW
-import  torch.nn.functional as F
-import torch.nn as nn
-from pytorch_lightning import Trainer
-import os
-from pytorch_lightning.callbacks import EarlyStopping
+
+from dataset.cub200_dataloader import CUB200Dataset
 
 bs = 64
 crop_size = 160
 
-
 train_transforms = transforms.Compose([
     transforms.Resize(224),
-    transforms.FiveCrop(crop_size),
+    transforms.RandomCrop(crop_size),
     transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
-val_transforms = transforms.Compose([ # as in vit extractor
+test_transforms = transforms.Compose([  # as in vit extractor
     transforms.Resize(224),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 model = models.resnet18()
 # Train on all
-#subset = None
+subset = None
 # Train on selected
-subset = [3,5]#[3, 5, 9, 15, 17, 18, 20, 21, 27, 29, 36, 44, 45, 46, 47, 51, 64, 72, 82, 84, 87, 90, 91, 92,93, 98, 99, 100, 104, 106, 107, 108, 110, 111, 134, 139, 141, 149, 173, 187, 199, 200]
+# subset = [3, 5]
+# subset = [3, 5, 9, 15, 17, 18, 20, 21, 27, 29, 36, 44, 45, 46, 47, 51, 64, 72, 82, 84, 87, 90, 91, 92,93, 98, 99, 100, 104, 106, 107, 108, 110, 111, 134, 139, 141, 149, 173, 187, 199, 200]
 
-ds_train = CUB200Dataset('./caltech_birds2011/CUB_200_2011', data_set='TRAIN', transform=trans,subset=subset)
-ds_test = CUB200Dataset('./caltech_birds2011/CUB_200_2011', data_set='TEST', transform=trans,subset=subset)
-ds_all = CUB200Dataset('./caltech_birds2011/CUB_200_2011', data_set='ALL', transform=trans,subset=subset)
+ds_train = CUB200Dataset('./dataset/caltech_birds2011/CUB_200_2011',
+                         data_set='TRAIN',
+                         transform=train_transforms,
+                         subset=subset)
+ds_test = CUB200Dataset('./dataset/caltech_birds2011/CUB_200_2011',
+                        data_set='TEST',
+                        transform=test_transforms,
+                        subset=subset)
+ds_all = CUB200Dataset('./dataset/caltech_birds2011/CUB_200_2011',
+                       data_set='ALL',
+                       transform=test_transforms,
+                       subset=subset)
 dl_train = DataLoader(ds_train, batch_size=bs, shuffle=True)
 dl_test = DataLoader(ds_test, batch_size=bs, shuffle=False)
 dl_all = DataLoader(ds_all, batch_size=bs, shuffle=False)
 
+
 class ResNet18_distillation(pl.LightningModule):
-    def __init__(self,model,teacher_temp, student_temp, num_labels=ds_train.num_classes()):
+    def __init__(self, model, teacher_temp, student_temp, num_labels=ds_train.num_classes()):
         super(ResNet18_distillation, self).__init__()
         self.resnet = model.cuda()
-        self.teacher_temp=teacher_temp
-        self.student_temp=student_temp
+        self.teacher_temp = teacher_temp
+        self.student_temp = student_temp
         self.final = nn.Linear(1000, num_labels).cuda()
         self.unfreeze()
 
     def forward(self, pixel_values):
-        outputs = self.resnet(pixel_values=pixel_values)
+        outputs = self.resnet(pixel_values)
         logits = self.final(outputs)
         return logits
 
@@ -77,17 +80,17 @@ class ResNet18_distillation(pl.LightningModule):
             param.requires_grad = True
 
     def common_step(self, batch, batch_idx):
-        imgs, labels, teacher_logits = batch['img'],batch['label'],batch['logit']
+        imgs, labels, teacher_logits = batch['img'], batch['label'], batch['logits']
         labels = labels.cuda()
-        imgs = imgs['pixel_values'].cuda().squeeze()
+        imgs = imgs.cuda()
         student_logits = self(imgs)
-        teacher_probs = F.softmax(teacher_logits/self.teacher_temp)
-        student_probs = F.softmax(student_logits/self.student_temp)
+        teacher_log_probs = F.log_softmax(teacher_logits / self.teacher_temp, dim=1)
+        student_log_probs = F.log_softmax(student_logits / self.student_temp, dim=1)
 
-        criterion = nn.CrossEntropyLoss()
-        loss = criterion(student_probs, teacher_probs)
+        criterion = nn.KLDivLoss(reduction='batchmean', log_target=True)
+        loss = criterion(student_log_probs, teacher_log_probs)
 
-        predictions = student_probs.argmax(-1)
+        predictions = student_log_probs.argmax(-1)
         accuracy = torch.where(predictions == labels, 1.0, 0.0)
         accuracy = torch.mean(accuracy)
 
@@ -121,9 +124,6 @@ class ResNet18_distillation(pl.LightningModule):
         return dl_test
 
 
-
-
-
 # for early stopping, see https://pytorch-lightning.readthedocs.io/en/1.0.0/early_stopping.html?highlight=early%20stopping
 early_stop_callback = EarlyStopping(
     monitor='training_accuracy',
@@ -133,7 +133,7 @@ early_stop_callback = EarlyStopping(
     mode='max'
 )
 
-model = ResNet18_distillation(models.resnet18(),0.06,0.1)
-trainer = Trainer(accelerator='gpu', callbacks=[early_stop_callback], log_every_n_steps=5,max_epochs=250)
+model = ResNet18_distillation(models.resnet18(), 0.06, 0.1)
+trainer = Trainer(accelerator='gpu', callbacks=[early_stop_callback], log_every_n_steps=5, max_epochs=250)
 trainer.fit(model)
-trainer.save_checkpoint('final.ckpt') # also saves logits
+trainer.save_checkpoint('final.ckpt')
