@@ -14,7 +14,7 @@ for i, ((root_data, dirs_data, files_data), (root_seg, dirs_seg, files_seg)) in 
     print(root_data[root_data.find('\\') + 1:])
     new_dir = os.path.join(path, 'cutouts', root_data[root_data.rfind('/') + 1:])
     os.mkdir(new_dir)
-    for img, seg in zip(files_data, files_seg):
+    for img, seg in zip(sorted(files_data), sorted(files_seg)):
         img_data = Image.open(os.path.join(root_data, img))
         img_data = np.asarray(img_data)
         seg_data = Image.open(os.path.join(root_seg, seg))
@@ -27,7 +27,7 @@ for i, ((root_data, dirs_data, files_data), (root_seg, dirs_seg, files_seg)) in 
         if len(img_data.shape) == 2:  # grayscale
             img_data = np.reshape(img_data, (img_data.shape[0], img_data.shape[1], 1))
             img_data = np.repeat(img_data, 3, axis=-1)
-
+        print(img,seg)
         img_data = img_data * seg_data
         img_data = np.uint8(img_data)
         im = Image.fromarray(img_data)
