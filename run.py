@@ -1,4 +1,5 @@
 import pytorch_lightning as pl
+import pytorch_lightning.loggers
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,14 +13,17 @@ from transformers import AdamW
 from dataset.cub200_dataloader import CUB200Dataset
 
 bs = 64
-crop_size = 160
-
+# https://github.com/M-Nauta/ProtoTree/blob/main/util/data.py
 train_transforms = transforms.Compose([
-    transforms.Resize(224),
-    transforms.RandomCrop(crop_size),
-    transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+    transforms.Resize(size=(224, 224)),
+    transforms.RandomOrder([
+        transforms.RandomPerspective(distortion_scale=0.2, p=0.5),
+        transforms.ColorJitter((0.6, 1.4), (0.6, 1.4), (0.6, 1.4), (-0.02, 0.02)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomAffine(degrees=10, shear=(-2, 2), translate=[0.05, 0.05]),
+    ]),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
 ])
 
 test_transforms = transforms.Compose([  # as in vit extractor
@@ -46,24 +50,40 @@ ds_all = CUB200Dataset('./dataset/caltech_birds2011/CUB_200_2011',
                        data_set='ALL',
                        transform=test_transforms,
                        subset=subset)
-dl_train = DataLoader(ds_train, batch_size=bs, shuffle=True)
-dl_test = DataLoader(ds_test, batch_size=bs, shuffle=False)
-dl_all = DataLoader(ds_all, batch_size=bs, shuffle=False)
+dl_train = DataLoader(ds_train, batch_size=bs, shuffle=True,num_workers=0)
+dl_test = DataLoader(ds_test, batch_size=bs, shuffle=False,num_workers=0)
+dl_all = DataLoader(ds_all, batch_size=bs, shuffle=False,num_workers=0)
 
 
 class ResNet18_distillation(pl.LightningModule):
-    def __init__(self, model, teacher_temp, student_temp, num_labels=ds_train.num_classes()):
+    def __init__(self, model, teacher_temp, student_temp, num_labels=ds_train.num_classes(),cls_size=384,loss_ratio=0.5,replace_fc=True):
         super(ResNet18_distillation, self).__init__()
         self.resnet = model.cuda()
+        print(resnet)
+        # replace resnet finisher with identity
+        num_features = 2048
+        if replace_fc:
+            num_features = self.resnet.fc.in_features
+            self.resnet.fc = nn.Identity()
+
         self.teacher_temp = teacher_temp
         self.student_temp = student_temp
-        self.final = nn.Linear(1000, num_labels).cuda()
+        self.loss_ratio = loss_ratio
+        self.cls_size = cls_size
+
+        self.final = nn.Sequential(
+            nn.Linear(num_features,(num_features+num_labels)//2),
+            nn.Linear((num_features+num_labels)//2, num_labels)).cuda()
+        self.final_cls = nn.Sequential(
+            nn.Linear(num_features,(num_features+cls_size)//2),
+            nn.Linear((num_features+cls_size)//2, cls_size)).cuda()
         self.unfreeze()
 
     def forward(self, pixel_values):
         outputs = self.resnet(pixel_values)
         logits = self.final(outputs)
-        return logits
+        cls = self.final_cls(outputs)
+        return {'logits':logits,'cls':cls}
 
     def freeze(self) -> None:
         for name, layer in self.resnet.named_modules():
@@ -80,35 +100,57 @@ class ResNet18_distillation(pl.LightningModule):
             param.requires_grad = True
 
     def common_step(self, batch, batch_idx):
-        imgs, labels, teacher_logits = batch['img'], batch['label'], batch['logits']
+        imgs, labels, teacher_logits, teacher_cls = batch['img'], batch['label'], batch['logits'], batch['cls']
         labels = labels.cuda()
         imgs = imgs.cuda()
-        student_logits = self(imgs)
+        outs =  self(imgs)
+
+        student_logits = outs['logits']
         teacher_log_probs = F.log_softmax(teacher_logits / self.teacher_temp, dim=1)
         student_log_probs = F.log_softmax(student_logits / self.student_temp, dim=1)
 
         criterion = nn.KLDivLoss(reduction='batchmean', log_target=True)
-        loss = criterion(student_log_probs, teacher_log_probs)
+        loss_dist = criterion(student_log_probs, teacher_log_probs)
+
+        student_cls = outs['cls']
+        criterion_cls = nn.MSELoss()
+        loss_cls = criterion_cls(student_cls,teacher_cls) / self.cls_size
 
         predictions = student_log_probs.argmax(-1)
         accuracy = torch.where(predictions == labels, 1.0, 0.0)
         accuracy = torch.mean(accuracy)
 
-        return loss, accuracy
+        return loss_dist,loss_cls, accuracy
 
     def training_step(self, batch, batch_idx):
-        loss, accuracy = self.common_step(batch, batch_idx)
+        loss_dist,loss_cls, accuracy = self.common_step(batch, batch_idx)
+
+        loss_dist = self.loss_ratio * loss_dist
+        loss_cls = (1-self.loss_ratio)*loss_cls
+        loss = loss_dist + loss_cls
+
         # logs metrics for each training_step,
         # and the average across the epoch
-        self.log("training_loss", loss)
-        self.log("training_accuracy", accuracy)
+        self.log("training_distillation_loss", loss_dist,on_epoch=True,batch_size=bs)
+        self.log("training_cls_loss", loss_cls,on_epoch=True,batch_size=bs)
+        self.log("training_loss", loss,prog_bar=True,on_epoch=True,batch_size=bs)
+        self.log("training_accuracy", accuracy,prog_bar=True,on_epoch=True,batch_size=bs)
 
         return loss
 
     def test_step(self, batch, batch_idx):
-        loss, accuracy = self.common_step(batch, batch_idx)
-        self.log("test_loss", loss, on_epoch=True)
-        self.log("test_accuracy", accuracy, on_epoch=True)
+        loss_dist, loss_cls, accuracy = self.common_step(batch, batch_idx)
+
+        loss_dist = self.loss_ratio * loss_dist
+        loss_cls = (1-self.loss_ratio)*loss_cls
+        loss = loss_dist + loss_cls
+
+        # logs metrics for each training_step,
+        # and the average across the epoch
+        self.log("test_distillation_loss", loss_dist, on_epoch=True,batch_size=bs)
+        self.log("test_cls_loss", loss_cls, on_epoch=True,batch_size=bs)
+        self.log("test_loss", loss, on_epoch=True,batch_size=bs)
+        self.log("test_accuracy", accuracy, on_epoch=True,batch_size=bs)
 
         return loss
 
@@ -132,8 +174,12 @@ early_stop_callback = EarlyStopping(
     verbose=False,
     mode='max'
 )
+# resnet = models.resnet18()
+resnet = torch.hub.load('facebookresearch/dino:main', 'dino_resnet50') # dino has last layer removed. set replace_fc to False
 
-model = ResNet18_distillation(models.resnet18(), 0.06, 0.1)
-trainer = Trainer(accelerator='gpu', callbacks=[early_stop_callback], log_every_n_steps=5, max_epochs=250)
+# loss = loss_ratio * loss_dist + (1-loss_ratio)*loss_cls
+model = ResNet18_distillation(resnet, teacher_temp= 0.06, student_temp= 0.1,loss_ratio=0.1,replace_fc=False)
+trainer = Trainer(accelerator='gpu', callbacks=[early_stop_callback], log_every_n_steps=5, max_epochs=250,
+                  logger=pytorch_lightning.loggers.TensorBoardLogger('logs',name='Transformer2cnn'))
 trainer.fit(model)
 trainer.save_checkpoint('final.ckpt')
