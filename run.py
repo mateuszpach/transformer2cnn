@@ -27,7 +27,7 @@ train_transforms = transforms.Compose([
 ])
 
 test_transforms = transforms.Compose([  # as in vit extractor
-    transforms.Resize(224),
+    transforms.Resize(size=(224, 224)),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
@@ -109,6 +109,8 @@ class ResNet18_distillation(pl.LightningModule):
         teacher_log_probs = F.log_softmax(teacher_logits / self.teacher_temp, dim=1)
         student_log_probs = F.log_softmax(student_logits / self.student_temp, dim=1)
 
+        # loss_dist = nn.CrossEntropyLoss()(student_logits, labels)
+        # loss_cls = 0
         criterion = nn.KLDivLoss(reduction='batchmean', log_target=True)
         loss_dist = criterion(student_log_probs, teacher_log_probs)
 
@@ -120,10 +122,14 @@ class ResNet18_distillation(pl.LightningModule):
         accuracy = torch.where(predictions == labels, 1.0, 0.0)
         accuracy = torch.mean(accuracy)
 
-        return loss_dist,loss_cls, accuracy
+        base_predictions = teacher_log_probs.argmax(-1)
+        base_accuracy = torch.where(base_predictions == labels, 1.0, 0.0)
+        base_accuracy = torch.mean(base_accuracy)
+
+        return loss_dist, loss_cls, accuracy, base_accuracy
 
     def training_step(self, batch, batch_idx):
-        loss_dist,loss_cls, accuracy = self.common_step(batch, batch_idx)
+        loss_dist,loss_cls, accuracy, base_accuracy = self.common_step(batch, batch_idx)
 
         loss_dist = self.loss_ratio * loss_dist
         loss_cls = (1-self.loss_ratio)*loss_cls
@@ -135,11 +141,29 @@ class ResNet18_distillation(pl.LightningModule):
         self.log("training_cls_loss", loss_cls,on_epoch=True,batch_size=bs)
         self.log("training_loss", loss,prog_bar=True,on_epoch=True,batch_size=bs)
         self.log("training_accuracy", accuracy,prog_bar=True,on_epoch=True,batch_size=bs)
+        self.log("training_base_accuracy", base_accuracy, on_epoch=True,batch_size=bs)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss_dist, loss_cls, accuracy, base_accuracy = self.common_step(batch, batch_idx)
+
+        loss_dist = self.loss_ratio * loss_dist
+        loss_cls = (1-self.loss_ratio)*loss_cls
+        loss = loss_dist + loss_cls
+
+        # logs metrics for each training_step,
+        # and the average across the epoch
+        self.log("val_distillation_loss", loss_dist, on_epoch=True,batch_size=bs)
+        self.log("val_cls_loss", loss_cls, on_epoch=True,batch_size=bs)
+        self.log("val_loss", loss, on_epoch=True,batch_size=bs)
+        self.log("val_accuracy", accuracy, on_epoch=True,batch_size=bs)
+        self.log("val_base_accuracy", base_accuracy, on_epoch=True,batch_size=bs)
 
         return loss
 
     def test_step(self, batch, batch_idx):
-        loss_dist, loss_cls, accuracy = self.common_step(batch, batch_idx)
+        loss_dist, loss_cls, accuracy, base_accuracy = self.common_step(batch, batch_idx)
 
         loss_dist = self.loss_ratio * loss_dist
         loss_cls = (1-self.loss_ratio)*loss_cls
@@ -151,6 +175,7 @@ class ResNet18_distillation(pl.LightningModule):
         self.log("test_cls_loss", loss_cls, on_epoch=True,batch_size=bs)
         self.log("test_loss", loss, on_epoch=True,batch_size=bs)
         self.log("test_accuracy", accuracy, on_epoch=True,batch_size=bs)
+        self.log("test_base_accuracy", base_accuracy, on_epoch=True,batch_size=bs)
 
         return loss
 
@@ -165,11 +190,14 @@ class ResNet18_distillation(pl.LightningModule):
     def test_dataloader(self):
         return dl_test
 
+    def val_dataloader(self):
+        return dl_test
+
 
 # for early stopping, see https://pytorch-lightning.readthedocs.io/en/1.0.0/early_stopping.html?highlight=early%20stopping
 early_stop_callback = EarlyStopping(
-    monitor='training_accuracy',
-    patience=5,
+    monitor='val_accuracy',
+    patience=20,
     strict=False,
     verbose=False,
     mode='max'
@@ -179,7 +207,8 @@ resnet = torch.hub.load('facebookresearch/dino:main', 'dino_resnet50') # dino ha
 
 # loss = loss_ratio * loss_dist + (1-loss_ratio)*loss_cls
 model = ResNet18_distillation(resnet, teacher_temp= 0.06, student_temp= 0.1,loss_ratio=0.1,replace_fc=False)
-trainer = Trainer(accelerator='gpu', callbacks=[early_stop_callback], log_every_n_steps=5, max_epochs=250,
+trainer = Trainer(accelerator='gpu', callbacks=[early_stop_callback], log_every_n_steps=5, max_epochs=300,
                   logger=pytorch_lightning.loggers.TensorBoardLogger('logs',name='Transformer2cnn'))
 trainer.fit(model)
+trainer.test()
 trainer.save_checkpoint('final.ckpt')

@@ -9,4 +9,4 @@
 cd $HOME/transformer2cnn
 python3 -m venv transformer2cnn
 source transformer2cnn/bin/activate
-pip install torch Pillow pytorch-lightning transformers numpy torchvision
+pip install torch Pillow pytorch-lightning transformers numpy torchvision tensorboard tensorboardX
