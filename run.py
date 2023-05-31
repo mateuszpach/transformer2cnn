@@ -14,10 +14,13 @@ configs = {
     "num_labels": [200],
     "cls_size": [384],
     "weights": [
-        {"cls_weight": 1, "logits_weight": 1, "ce_weight": 1, "ikd_weight": 1, "rkd_d_weight": 1, "rkd_a_weight": 1}
+        # w rkd
+        {"cls_weight": 3, "logits_weight": 1, "ce_weight": 1/50, "ikd_weight": 1/30, "rkd_d_weight": 3, "rkd_a_weight": 4.5}
+        # w/o rkd
+        # {"cls_weight": 3, "logits_weight": 1, "ce_weight": 1/25, "ikd_weight": 1/12, "rkd_d_weight": 0., "rkd_a_weight": 0.}
     ],
-    "backbone_lr": [5e-7],
-    "head_lr": [5e-5]
+    "backbone_lr": [5e-6],
+    "head_lr": [5e-4]
 }
 
 configs = product(
@@ -65,9 +68,10 @@ for hyperparams in configs:
     trainer = Trainer(accelerator='auto',
                       callbacks=[early_stop_callback],
                       log_every_n_steps=5,
-                      max_epochs=300,
+                      max_epochs=500,
                       logger=wandb_logger,
-                      fast_dev_run=1)
+                      # fast_dev_run=1
+                      )
     trainer.fit(model=model, datamodule=datamodule)
 
     # trainer.test()

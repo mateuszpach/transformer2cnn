@@ -25,6 +25,8 @@ class DistilledResNetModel(pl.LightningModule):
         super(DistilledResNetModel, self).__init__()
         self.save_hyperparameters()
         self.resnet = resnet_model
+        self.head_lr = head_lr
+        self.backbone_lr = backbone_lr
         print(self.resnet)
 
         # replace resnet finisher with identity
@@ -110,18 +112,16 @@ class DistilledResNetModel(pl.LightningModule):
         }
 
     def training_step(self, batch, batch_idx):
-        backbone_optimizer, head_optimizer = self.optimizers()
+        optimizer = self.optimizers()
 
         metrics = self.common_step(batch, batch_idx)
 
         self.manual_backward(metrics['loss'])
-        head_optimizer.step()
-        backbone_optimizer.step()
-        head_optimizer.zero_grad()
-        backbone_optimizer.zero_grad()
+        optimizer.step()
+        optimizer.zero_grad()
 
         for name, value in metrics.items():
-            self.log("training/" + name, value, prog_bar=True, on_epoch=True, batch_size=len(batch))
+            self.log("training/" + name, value, prog_bar=False, on_epoch=True, batch_size=len(batch))
 
         return metrics['loss']
 
@@ -129,7 +129,7 @@ class DistilledResNetModel(pl.LightningModule):
         metrics = self.common_step(batch, batch_idx)
 
         for name, value in metrics.items():
-            self.log("validation/" + name, value, prog_bar=True, on_epoch=True, batch_size=len(batch))
+            self.log("validation/" + name, value, prog_bar=False, on_epoch=True, batch_size=len(batch))
 
         return metrics['loss']
 
@@ -137,7 +137,7 @@ class DistilledResNetModel(pl.LightningModule):
         metrics = self.common_step(batch, batch_idx)
 
         for name, value in metrics.items():
-            self.log("test/" + name, value, prog_bar=True, on_epoch=True, batch_size=len(batch))
+            self.log("test/" + name, value, prog_bar=False, on_epoch=True, batch_size=len(batch))
 
         return metrics['loss']
 
@@ -146,8 +146,8 @@ class DistilledResNetModel(pl.LightningModule):
     def configure_optimizers(self):
         # We could make the optimizer more fancy by adding a scheduler and specifying which parameters do
         # not require weight_decay but just using AdamW out-of-the-box works fine
-        backbone_optimizer = AdamW(self.resnet.parameters(),
-                                   lr=self.hparams.backbone_lr)
-        head_optimizer = AdamW(list(self.cls_projection.parameters()) + list(self.final_projection.parameters()),
-                               lr=self.hparams.head_lr)
-        return backbone_optimizer, head_optimizer
+        params = []
+        params.append({'params':self.resnet.parameters(),'lr':self.hparams.backbone_lr})
+        params.append({'params':list(self.cls_projection.parameters()) + list(self.final_projection.parameters()),'lr':self.hparams.head_lr})
+        optimizer = AdamW(params)
+        return optimizer
