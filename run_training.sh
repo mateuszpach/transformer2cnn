@@ -3,6 +3,7 @@
 #SBATCH --qos=normal
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
+#SBATCH --cpus-per-task=20
 #SBATCH --partition=student
 
 cd $HOME/transformer2cnn

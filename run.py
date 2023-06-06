@@ -15,9 +15,9 @@ configs = {
     "cls_size": [384],
     "weights": [
         # w rkd
-        {"cls_weight": 3, "logits_weight": 1, "ce_weight": 1/50, "ikd_weight": 1/30, "rkd_d_weight": 3, "rkd_a_weight": 4.5}
+        # {"cls_weight": 3, "logits_weight": 1, "ce_weight": 1/50, "ikd_weight": 1/30, "rkd_d_weight": 3, "rkd_a_weight": 4.5}
         # w/o rkd
-        # {"cls_weight": 3, "logits_weight": 1, "ce_weight": 1/25, "ikd_weight": 1/12, "rkd_d_weight": 0., "rkd_a_weight": 0.}
+        {"cls_weight": 3, "logits_weight": 1, "ce_weight": 1/25, "ikd_weight": 1/12, "rkd_d_weight": 0., "rkd_a_weight": 0.}
     ],
     "backbone_lr": [5e-6],
     "head_lr": [5e-4]
