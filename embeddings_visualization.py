@@ -76,7 +76,7 @@ def create_tsne_visualization(model, test_loader, num_classes, class_names, out_
     plt.figure(figsize=(20, 16))
     color_map = plt.cm.get_cmap('tab10', num_classes)  # Colormap for coloring samples
 
-    scatter = plt.scatter(embeddings_tsne[:, 0], embeddings_tsne[:, 1], c=labels, cmap=color_map)
+    scatter = plt.scatter(embeddings_tsne[:, 0], embeddings_tsne[:, 1], c=labels, cmap=color_map, s=150)
 
     plt.colorbar(scatter)  # Add colorbar
 
@@ -98,10 +98,10 @@ if __name__ == "__main__":
     if args.model == 'dino2resnet':
         resnet = torch.hub.load('facebookresearch/dino:main', 'dino_resnet50')
         model = DistilledResNetModel(resnet, replace_fc=False)
-        model.load_from_checkpoint(args.checkpoint)
+        model.load_from_checkpoint(args.checkpoint, map_location=torch.device('cpu'))
     elif args.model == 'dinovit':
         model = ViTLightningModule()
-        model.load_from_checkpoint(args.checkpoint)
+        model.load_from_checkpoint(args.checkpoint, map_location=torch.device('cpu'))
 
     if args.dataset == 'CUB200':
         datamodule = CUB200DataModule(subset=[3, 15, 21, 46, 51, 84, 106, 111, 187, 200], batch_size=2)

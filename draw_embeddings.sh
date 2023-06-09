@@ -11,5 +11,5 @@ source transformer2cnn/bin/activate
 
 python -u embeddings_visualization.py --dataset CUB200 --model dinovit --checkpoint dataset/final.ckpt
 python -u embeddings_visualization.py --dataset CIFAR10 --model dinovit --checkpoint dataset/final.ckpt
-python -u embeddings_visualization.py --dataset CUB200 --model dino2resnet --checkpoint final.ckpt
-python -u embeddings_visualization.py --dataset CIFAR10 --model dino2resnet --checkpoint final.ckpt
+#python -u embeddings_visualization.py --dataset CUB200 --model dino2resnet --checkpoint final.ckpt
+#python -u embeddings_visualization.py --dataset CIFAR10 --model dino2resnet --checkpoint final.ckpt
