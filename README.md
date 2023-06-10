@@ -1,5 +1,5 @@
 # transformer2cnn
-## Distillation of transformer into the CNN for fine-grained image recognition
+## Distillation of the transformer into the CNN for fine-grained image recognition
 ### [Slides](slides.pdf)
 ### Summary
 - Distillation of the transformer’s knowledge into the CNN is explored.
